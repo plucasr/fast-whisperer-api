@@ -12,6 +12,9 @@ load_dotenv()
 
 # Load the Whisper model from environment variable or use a default
 MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny.en")
+YOUTUBE_USERNAME = os.getenv("YOUTUBE_USERNAME")
+YOUTUBE_PASSWORD = os.getenv("YOUTUBE_PASSWORD")
+
 # Create a directory for temporary audio files if it doesn't exist
 TEMP_AUDIO_DIR = Path("temp_audio")
 TEMP_AUDIO_DIR.mkdir(exist_ok=True)
@@ -82,6 +85,11 @@ async def create_transcription(request: TranscriptionRequest):
         "outtmpl": str(audio_filepath.with_suffix("")),  # yt-dlp adds the extension
         "quiet": True,
     }
+
+    # Add credentials if they are provided in environment variables
+    if YOUTUBE_USERNAME and YOUTUBE_PASSWORD:
+        ydl_opts["username"] = YOUTUBE_USERNAME
+        ydl_opts["password"] = YOUTUBE_PASSWORD
 
     try:
         # Download the audio from YouTube
