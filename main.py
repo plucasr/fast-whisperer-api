@@ -12,14 +12,13 @@ load_dotenv()
 
 # Load the Whisper model from environment variable or use a default
 MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny.en")
-COOKIES = os.getenv("COOKIES")  # Cookies content from environment variable
 
 # Create a directory for temporary audio files if it doesn't exist
 TEMP_AUDIO_DIR = Path("temp_audio")
 TEMP_AUDIO_DIR.mkdir(exist_ok=True)
 
-# Path for cookies.txt in the root directory
-COOKIE_FILE_PATH = Path("./cookies.txt")
+# Path for cookies.txt from Render.com secrets or fallback to local file
+COOKIE_FILE_PATH = Path("/etc/secrets/cookies.txt")
 
 # --- Model Loading ---
 # This is a heavy object, so we load it once and reuse it for all requests.
@@ -61,23 +60,6 @@ def read_root():
     return {"message": "Welcome to the YouTube Transcription API"}
 
 
-def create_cookies_file():
-    """
-    Dynamically creates cookies.txt from the COOKIES environment variable.
-    """
-    if COOKIES:
-        try:
-            COOKIE_FILE_PATH.write_text(COOKIES)
-            print(f"Created cookies.txt at: {COOKIE_FILE_PATH.absolute()}")
-        except Exception as e:
-            print(f"Error creating cookies.txt: {e}")
-            raise HTTPException(
-                status_code=500, detail=f"Failed to create cookies file: {str(e)}"
-            )
-    else:
-        print("Warning: COOKIES environment variable is not set.")
-
-
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def create_transcription(request: TranscriptionRequest):
     """
@@ -85,9 +67,6 @@ async def create_transcription(request: TranscriptionRequest):
     """
     if not whisper_model:
         raise HTTPException(status_code=500, detail="Whisper model is not available.")
-
-    # Create cookies.txt dynamically from environment variable
-    create_cookies_file()
 
     # Generate a unique filename for the temporary audio file
     unique_id = uuid.uuid4()
