@@ -2,3 +2,8 @@ fastapi
 uvicorn
 youtube-transcript-api
 pydantic
+faster-whisper
+python-multipart
+httpx
+pytest
+requests
