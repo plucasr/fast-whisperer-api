@@ -1,0 +1,14 @@
+services:
+  whisperer:
+    build: .
+    container_name: lexios_whisperer
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      # Pass through env vars or load from file
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
