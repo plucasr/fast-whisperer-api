@@ -1,94 +1,72 @@
-from typing import Any, Dict, List, Optional
-
-import uvicorn
-from audio_utils import AudioProcessor, get_supported_languages
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 from agent_graph import app as agent_app
+from chat_agent import app as chat_agent_app
+import json
+import asyncio
 
-app = FastAPI(title="Lexios Transcription API & AI Hub")
+# ... (rest of imports)
 
-# Add CORS middleware for cross-origin requests
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# ... (existing code)
 
-# Initialize audio processor
-audio_processor = AudioProcessor(model_size="small", device="cpu", compute_type="int8")
-
-
-class AudioTranscriptionResponse(BaseModel):
-    success: bool
-    transcript: Optional[str]
-    language: Optional[str]
-    language_probability: Optional[float] = None
-    duration: Optional[float]
-    segments: Optional[List[Dict[str, Any]]] = None
-    word_count: Optional[int] = None
-    character_count: Optional[int] = None
-    segment_count: Optional[int] = None
-    average_confidence: Optional[float] = None
-    model_info: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
-class SurveyRequest(BaseModel):
-    hub_url: str
-
-
-@app.get("/")
-def root():
-    return {
-        "message": "Lexios Transcription API & AI Hub",
-        "version": "1.1.0",
-        "endpoints": {
-            "POST /transcribe": "Transcribe uploaded audio file",
-            "POST /survey": "Trigger AI Hub Surveyor agent",
-            "GET /supported-languages": "Get list of supported languages",
-            "GET /health": "Health check endpoint",
-        },
-    }
-
-@app.post("/survey")
-async def trigger_survey(request: SurveyRequest):
-    """
-    Triggers the AI Hub Surveyor agent to crawl and catalog resources.
-    """
+@app.websocket("/chat/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
     try:
-        # Run the agent graph
-        initial_state = {
-            "hub_url": request.hub_url,
-            "messages": [HumanMessage(content="Start survey")],
-            "discovered_links": [],
-            "current_repo": "",
-            "resources_found": []
-        }
-        
-        # Invoke the graph (synchronously for now, can be async with astream)
-        # Note: For long running processes, we should use BackgroundTasks or a queue.
-        # For this PoC, we wait.
-        result = agent_app.invoke(initial_state)
-        
-        # Extract messages or status
-        messages = [m.content for m in result.get("messages", [])]
-        
-        return {
-            "success": True,
-            "status": "completed",
-            "messages": messages[-1] if messages else "No output",
-            "resources_saved_count": len(result.get("resources_found", []))
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Survey execution failed: {str(e)}")
+        while True:
+            data = await websocket.receive_text()
+            try:
+                message_data = json.loads(data)
+                user_message = message_data.get("message")
+                messages = message_data.get("messages", [])
+                
+                if user_message:
+                     # Construct history. If client sends full history, use it. 
+                     # Otherwise, we might need to manage state here or rely on client to send history.
+                     # For simplicity and statelessness matching the HTTP endpoint, let's assume client sends history + new message
+                     # OR just the new message and we append to a list provided in 'messages'.
+                     
+                    lc_messages = []
+                    for msg in messages:
+                        if msg["role"] == "user":
+                            lc_messages.append(HumanMessage(content=msg["content"]))
+                        elif msg["role"] == "assistant":
+                            # LangChain doesn't have a direct AIMessage(content=...) for input in this specific graph context usually,
+                            # but standard is AIMessage.
+                            from langchain_core.messages import AIMessage
+                            lc_messages.append(AIMessage(content=msg["content"]))
+                    
+                    lc_messages.append(HumanMessage(content=user_message))
+                    
+                    initial_state = {"messages": lc_messages}
 
+                    async for event in chat_agent_app.astream_events(initial_state, version="v1"):
+                        kind = event["event"]
+                        
+                        if kind == "on_chat_model_stream":
+                            content = event["data"]["chunk"].content
+                            if content:
+                                await websocket.send_json({"chunk": content, "status": "streaming"})
+                        elif kind == "on_chat_model_end":
+                            output = event["data"].get("output")
+                            if output and hasattr(output, "usage_metadata"):
+                                await websocket.send_json({"usage": output.usage_metadata, "status": "usage"})
+                        
+                    await websocket.send_json({"status": "final"})
+                    
+            except json.JSONDecodeError:
+                await websocket.send_json({"error": "Invalid JSON", "status": "error"})
+            except Exception as e:
+                print(f"Error in websocket loop: {e}")
+                await websocket.send_json({"error": str(e), "status": "error"})
+
+    except WebSocketDisconnect:
+        print("Client disconnected")
 
 @app.post("/transcribe", response_model=AudioTranscriptionResponse)
+# ... (rest of file)
 async def transcribe_audio(
     file: UploadFile = File(...),
     language: Optional[str] = Form(None),

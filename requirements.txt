@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 youtube-transcript-api
 pydantic
 faster-whisper
@@ -10,6 +10,7 @@ requests
 langgraph
 langchain
 langchain-google-genai
+google-generativeai
 PyGithub
-libsql-experimental
+libsql-client
 python-dotenv
