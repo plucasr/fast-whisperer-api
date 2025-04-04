@@ -6,8 +6,10 @@ from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+from config import GEMINI_MODEL
+
+# Initialize LLM
+llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0)
 
 # Define the state
 class AgentState(TypedDict):
@@ -16,9 +18,6 @@ class AgentState(TypedDict):
     discovered_links: List[str]
     current_repo: str
     resources_found: List[dict]
-
-# Initialize LLM
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
 from tools.github_tools import get_readme_content, list_repo_files
 

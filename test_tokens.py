@@ -4,10 +4,12 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
 
+from config import GEMINI_MODEL
+
 load_dotenv()
 
 async def test_token_usage():
-    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.7)
+    llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, temperature=0.7)
     messages = [HumanMessage(content="Hello, tell me a very short joke.")]
     
     print("--- Invoking ---")
