@@ -1,3 +1,5 @@
+![banner](docs/banner.svg)
+
 # Lexios Transcription API
 
 A FastAPI-based transcription service that provides both YouTube transcript fetching and audio file transcription using OpenAI's Whisper model via faster-whisper.
@@ -239,3 +241,4 @@ docker run -p 8000:8000 lexios-transcription
 ## License
 
 MIT License - see LICENSE file for details.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
