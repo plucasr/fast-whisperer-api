@@ -1,0 +1,3 @@
+# Conservative rule set: real errors only, matching this codebase's era/style.
+target-version = "py310"
+select = ["E4", "E7", "E9", "F"]
