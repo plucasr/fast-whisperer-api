@@ -19,6 +19,65 @@ TEMP_AUDIO_DIR.mkdir(exist_ok=True)
 
 # Path for cookies.txt from Render.com secrets or fallback to local file
 COOKIE_FILE_PATH = Path("/etc/secrets/cookies.txt")
+SECRETS_DIR = Path("/etc/secrets")
+
+# --- Helper Functions ---
+def list_secrets_directory():
+    """
+    Lists and logs all files in the /etc/secrets/ directory.
+    """
+    print(f"\n{'='*50}")
+    print(f"Listing contents of: {SECRETS_DIR}")
+    print(f"{'='*50}")
+    
+    try:
+        if SECRETS_DIR.exists() and SECRETS_DIR.is_dir():
+            files = list(SECRETS_DIR.iterdir())
+            if files:
+                print(f"Found {len(files)} file(s) in {SECRETS_DIR}:")
+                for file in files:
+                    file_type = "Directory" if file.is_dir() else "File"
+                    size = file.stat().st_size if file.is_file() else None
+                    size_str = f" ({size} bytes)" if size is not None else ""
+                    print(f"  - {file.name} ({file_type}){size_str}")
+            else:
+                print(f"Directory {SECRETS_DIR} exists but is empty.")
+        else:
+            print(f"Directory {SECRETS_DIR} does not exist or is not a directory.")
+    except PermissionError:
+        print(f"Permission denied: Cannot access {SECRETS_DIR}")
+    except Exception as e:
+        print(f"Error listing {SECRETS_DIR}: {e}")
+    
+    print(f"{'='*50}\n")
+
+
+def check_cookies_file():
+    """
+    Checks if the cookies.txt file exists and logs the result.
+    """
+    print(f"\n{'='*50}")
+    print(f"Checking for cookies file: {COOKIE_FILE_PATH}")
+    print(f"{'='*50}")
+    
+    try:
+        if COOKIE_FILE_PATH.exists():
+            if COOKIE_FILE_PATH.is_file():
+                file_size = COOKIE_FILE_PATH.stat().st_size
+                print(f"✓ cookies.txt exists")
+                print(f"  Path: {COOKIE_FILE_PATH.absolute()}")
+                print(f"  Size: {file_size} bytes")
+            else:
+                print(f"✗ Path exists but is not a file: {COOKIE_FILE_PATH}")
+        else:
+            print(f"✗ cookies.txt does not exist at: {COOKIE_FILE_PATH}")
+    except PermissionError:
+        print(f"✗ Permission denied: Cannot access {COOKIE_FILE_PATH}")
+    except Exception as e:
+        print(f"✗ Error checking cookies file: {e}")
+    
+    print(f"{'='*50}\n")
+
 
 # --- Model Loading ---
 # This is a heavy object, so we load it once and reuse it for all requests.
@@ -39,6 +98,15 @@ app = FastAPI(
     description="An API to transcribe audio from YouTube videos using faster-whisper.",
     version="0.1.0",
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Runs at application startup to check and log secrets configuration.
+    """
+    list_secrets_directory()
+    check_cookies_file()
 
 
 # --- Pydantic Models ---
