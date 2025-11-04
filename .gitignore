@@ -2,7 +2,8 @@
 .env
 
 # Temporary files
-/temp_audio/
+.env
+temp_audio/
 
 # Python
 __pycache__/
