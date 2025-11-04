@@ -1,0 +1,9 @@
+# Environments
+.env
+
+# Temporary files
+/temp_audio/
+
+# Python
+__pycache__/
+*.pyc
