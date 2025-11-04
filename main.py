@@ -144,7 +144,6 @@ async def create_transcription(request: TranscriptionRequest):
     # Configure yt-dlp to download audio-only in mp3 format
     ydl_opts = {
         "format": "bestaudio/best",
-        "cookiefile": str(COOKIE_FILE_PATH),
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -155,6 +154,13 @@ async def create_transcription(request: TranscriptionRequest):
         "outtmpl": str(audio_filepath.with_suffix("")),  # yt-dlp adds the extension
         "quiet": True,
     }
+    
+    # Only add cookiefile if it exists
+    if COOKIE_FILE_PATH.exists() and COOKIE_FILE_PATH.is_file():
+        ydl_opts["cookiefile"] = str(COOKIE_FILE_PATH)
+        print(f"Using cookies file: {COOKIE_FILE_PATH}")
+    else:
+        print(f"Warning: Cookies file not found at {COOKIE_FILE_PATH}. Continuing without cookies.")
 
     try:
         # Download the audio from YouTube
