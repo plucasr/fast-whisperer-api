@@ -1,8 +1,4 @@
 fastapi
-pydantic
 uvicorn[standard]
-faster-whisper
-youtube-transcript-api
 python-dotenv
-requests
-urllib3
+youtube-transcript-api
