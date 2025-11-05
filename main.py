@@ -11,7 +11,11 @@ from pydantic import BaseModel, HttpUrl
 # from faster_whisper import WhisperModel
 
 # --- New Import for Subtitles ---
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    TranscriptsDisabled,
+    NoTranscriptFound,
+)
 from urllib.parse import urlparse, parse_qs
 # ---------------------------------
 
@@ -98,7 +102,6 @@ async def create_transcription(request: TranscriptionRequest):
     """
     Fetches the transcript/subtitles from a YouTube URL and returns the text.
     """
-
     video_url = str(request.youtube_url)
     video_id = extract_video_id(video_url)
 
@@ -108,101 +111,65 @@ async def create_transcription(request: TranscriptionRequest):
         )
 
     try:
-        # Try to use list_transcripts (newer API) if available, otherwise fall back to get_transcript
-        raw_transcript = None
-        
-        # Method 1: Try using list_transcripts (for newer versions of youtube-transcript-api)
+        # 1. List all available transcripts using the modern method (requires updated library)
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+        # 2. Try to find the best English track (Manual preferred, then Auto)
         try:
-            if hasattr(YouTubeTranscriptApi, 'list_transcripts'):
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                
-                # Try to find the best English transcript (Manual preferred, Auto fallback)
-                try:
-                    # Try to find a manual or auto-generated English track
-                    transcript = transcript_list.find_transcript(["en", "en-US"])
-                    print(
-                        f"Transcript found: Language='{transcript.language}', Generated={transcript.is_generated}"
-                    )
-                    raw_transcript = transcript.fetch()
-                except Exception as find_error:
-                    # Fallback: Check if there's any auto-generated transcript available
-                    try:
-                        # Find the first available generated transcript
-                        transcript = next(t for t in transcript_list if t.is_generated)
-                        print(
-                            f"Only auto-generated track found: Language='{transcript.language}'"
-                        )
-                        raw_transcript = transcript.fetch()
-                    except StopIteration:
-                        # If no transcripts are found, fall through to get_transcript method
-                        print("No transcripts found via list_transcripts, trying get_transcript...")
-                        pass
-            else:
-                print("list_transcripts not available, using get_transcript method...")
-        except Exception as list_error:
-            print(f"Error with list_transcripts: {list_error}, trying get_transcript method...")
-        
-        # Method 2: Fallback to get_transcript (simpler, works with older versions)
-        if raw_transcript is None:
-            try:
-                # Try English first
-                raw_transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'en-US'])
-                print("Fetched English transcript using get_transcript")
-            except Exception:
-                try:
-                    # Try auto-generated transcript
-                    raw_transcript = YouTubeTranscriptApi.get_transcript(video_id)
-                    print("Fetched auto-generated transcript using get_transcript")
-                except Exception as get_error:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"No subtitles (manual or auto-generated) are available for this video. Error: {str(get_error)}"
-                    )
-        
-        # Format the content into a single block of text
-        if raw_transcript:
-            # raw_transcript is a list of dicts with 'text', 'start', 'duration'
-            # Format it into a single block of text
-            full_transcription = " ".join([item['text'] for item in raw_transcript])
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail="No subtitles could be retrieved for this video."
+            # We explicitly search for English ('en' or 'en-US')
+            # This will automatically prioritize manual over auto-generated.
+            transcript = transcript_list.find_transcript(["en", "en-US"])
+            print(
+                f"INFO: Found English transcript. Generated: {transcript.is_generated}"
             )
 
-        print("Transcription (from subtitles) complete.")
+        except NoTranscriptFound:
+            print(
+                "WARNING: English track not found. Searching for any available auto-generated track."
+            )
+
+            # 3. Fallback: Search for ANY auto-generated track, regardless of language
+            try:
+                # Find the first available generated transcript
+                transcript = next(t for t in transcript_list if t.is_generated)
+                print(
+                    f"INFO: Using auto-generated track in language: {transcript.language}"
+                )
+
+            except (StopIteration, NoTranscriptFound):
+                # 4. Final Fail: No usable transcript (manual or auto) was found.
+                raise HTTPException(
+                    status_code=404,
+                    detail="No subtitles (manual or auto-generated) are available for this video.",
+                )
+
+        # 5. Fetch and Format the Transcript
+        raw_transcript = transcript.fetch()
+        full_transcription = " ".join([item["text"] for item in raw_transcript])
+
+        print("INFO: Transcription (from subtitles) complete.")
 
         return TranscriptionResponse(
             transcription=full_transcription, youtube_url=request.youtube_url
         )
 
+    # 6. Catch Specific Library Errors
     except TranscriptsDisabled:
         raise HTTPException(
             status_code=404,
             detail="Transcripts are explicitly disabled for this video by the creator.",
         )
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
     except Exception as e:
-        # Log the error for debugging with full details
+        # Catch network errors, IP blocks, or other general failures
         error_type = type(e).__name__
-        error_msg = str(e)
-        error_traceback = traceback.format_exc()
-        
-        print(f"\n{'=' * 50}")
-        print(f"ERROR OCCURRED")
-        print(f"{'=' * 50}")
-        print(f"Error Type: {error_type}")
-        print(f"Error Message: {error_msg}")
-        print(f"Error Args: {e.args}")
-        if hasattr(e, 'errno'):
-            print(f"Error Code: {e.errno}")
-        print(f"\nFull Traceback:\n{error_traceback}")
-        print(f"{'=' * 50}\n")
-        
+        print(f"FATAL ERROR: {error_type} - {str(e)}")
+        print(f"Full Traceback:\n{traceback.format_exc()}")
+
+        # NOTE: If this Exception is still raised, and it's not a library error,
+        # it might be due to YouTube blocking the IP of your cloud service (Render).
         raise HTTPException(
-            status_code=500, detail=f"An internal error occurred: {error_msg}"
+            status_code=500,
+            detail=f"An internal error occurred: {error_type}. (Check dependency version/IP status)",
         )
 
 
