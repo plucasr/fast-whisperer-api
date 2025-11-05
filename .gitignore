@@ -4,6 +4,7 @@
 # Temporary files
 .env
 temp_audio/
+cookies.txt
 
 # Python
 __pycache__/

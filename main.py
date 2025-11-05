@@ -1,5 +1,7 @@
 import os
 import uuid
+import shutil
+import traceback
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -17,8 +19,10 @@ MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny.en")
 TEMP_AUDIO_DIR = Path("temp_audio")
 TEMP_AUDIO_DIR.mkdir(exist_ok=True)
 
-# Path for cookies.txt from Render.com secrets or fallback to local file
-COOKIE_FILE_PATH = Path("/etc/secrets/cookies.txt")
+# Path for cookies.txt from Render.com secrets (read-only)
+SECRETS_COOKIE_PATH = Path("/etc/secrets/cookies.txt")
+# Writable cookies file path in app root directory
+COOKIE_FILE_PATH = Path("./cookies.txt")
 SECRETS_DIR = Path("/etc/secrets")
 
 # --- Helper Functions ---
@@ -54,27 +58,56 @@ def list_secrets_directory():
 
 def check_cookies_file():
     """
-    Checks if the cookies.txt file exists and logs the result.
+    Checks if the cookies.txt file exists in secrets and logs the result.
     """
     print(f"\n{'='*50}")
-    print(f"Checking for cookies file: {COOKIE_FILE_PATH}")
+    print(f"Checking for cookies file: {SECRETS_COOKIE_PATH}")
     print(f"{'='*50}")
     
     try:
-        if COOKIE_FILE_PATH.exists():
-            if COOKIE_FILE_PATH.is_file():
-                file_size = COOKIE_FILE_PATH.stat().st_size
-                print(f"✓ cookies.txt exists")
-                print(f"  Path: {COOKIE_FILE_PATH.absolute()}")
+        if SECRETS_COOKIE_PATH.exists():
+            if SECRETS_COOKIE_PATH.is_file():
+                file_size = SECRETS_COOKIE_PATH.stat().st_size
+                print(f"✓ cookies.txt exists in secrets")
+                print(f"  Path: {SECRETS_COOKIE_PATH.absolute()}")
                 print(f"  Size: {file_size} bytes")
             else:
-                print(f"✗ Path exists but is not a file: {COOKIE_FILE_PATH}")
+                print(f"✗ Path exists but is not a file: {SECRETS_COOKIE_PATH}")
         else:
-            print(f"✗ cookies.txt does not exist at: {COOKIE_FILE_PATH}")
+            print(f"✗ cookies.txt does not exist at: {SECRETS_COOKIE_PATH}")
     except PermissionError:
-        print(f"✗ Permission denied: Cannot access {COOKIE_FILE_PATH}")
+        print(f"✗ Permission denied: Cannot access {SECRETS_COOKIE_PATH}")
     except Exception as e:
         print(f"✗ Error checking cookies file: {e}")
+    
+    print(f"{'='*50}\n")
+
+
+def copy_cookies_file():
+    """
+    Copies the cookies file from /etc/secrets/ to a writable location in the app root.
+    """
+    print(f"\n{'='*50}")
+    print(f"Copying cookies file to writable location")
+    print(f"{'='*50}")
+    
+    try:
+        if SECRETS_COOKIE_PATH.exists() and SECRETS_COOKIE_PATH.is_file():
+            shutil.copy2(SECRETS_COOKIE_PATH, COOKIE_FILE_PATH)
+            file_size = COOKIE_FILE_PATH.stat().st_size
+            print(f"✓ Successfully copied cookies.txt")
+            print(f"  From: {SECRETS_COOKIE_PATH.absolute()}")
+            print(f"  To: {COOKIE_FILE_PATH.absolute()}")
+            print(f"  Size: {file_size} bytes")
+        else:
+            print(f"⚠ Source cookies file not found at {SECRETS_COOKIE_PATH}")
+            print(f"  Continuing without cookies file.")
+    except PermissionError as e:
+        print(f"✗ Permission denied: Cannot copy cookies file")
+        print(f"  Error: {e}")
+    except Exception as e:
+        print(f"✗ Error copying cookies file: {e}")
+        print(f"  Traceback: {traceback.format_exc()}")
     
     print(f"{'='*50}\n")
 
@@ -107,6 +140,7 @@ async def startup_event():
     """
     list_secrets_directory()
     check_cookies_file()
+    copy_cookies_file()
 
 
 # --- Pydantic Models ---
@@ -158,16 +192,31 @@ async def create_transcription(request: TranscriptionRequest):
     # Only add cookiefile if it exists
     if COOKIE_FILE_PATH.exists() and COOKIE_FILE_PATH.is_file():
         ydl_opts["cookiefile"] = str(COOKIE_FILE_PATH)
-        print(f"Using cookies file: {COOKIE_FILE_PATH}")
+        print(f"Using cookies file: {COOKIE_FILE_PATH.absolute()}")
     else:
         print(f"Warning: Cookies file not found at {COOKIE_FILE_PATH}. Continuing without cookies.")
 
     try:
         # Download the audio from YouTube
         print(f"Downloading audio from: {request.youtube_url}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([str(request.youtube_url)])
-        print(f"Audio downloaded to: {audio_filepath}")
+        print(f"yt-dlp options: {ydl_opts}")
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([str(request.youtube_url)])
+            print(f"Audio downloaded to: {audio_filepath}")
+        except OSError as os_error:
+            # Log detailed OS-level errors
+            print(f"OS Error during download: {os_error}")
+            print(f"Error type: {type(os_error).__name__}")
+            print(f"Error code: {getattr(os_error, 'errno', 'N/A')}")
+            print(f"Full traceback:\n{traceback.format_exc()}")
+            raise
+        except Exception as download_error:
+            # Log other download errors
+            print(f"Error during download: {download_error}")
+            print(f"Error type: {type(download_error).__name__}")
+            print(f"Full traceback:\n{traceback.format_exc()}")
+            raise
 
         if not audio_filepath.exists():
             raise HTTPException(
@@ -190,11 +239,28 @@ async def create_transcription(request: TranscriptionRequest):
             transcription=full_transcription, youtube_url=request.youtube_url
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        # Log the error for debugging
-        print(f"An error occurred: {e}")
+        # Log the error for debugging with full details
+        error_type = type(e).__name__
+        error_msg = str(e)
+        error_traceback = traceback.format_exc()
+        
+        print(f"\n{'='*50}")
+        print(f"ERROR OCCURRED")
+        print(f"{'='*50}")
+        print(f"Error Type: {error_type}")
+        print(f"Error Message: {error_msg}")
+        print(f"Error Args: {e.args}")
+        if hasattr(e, 'errno'):
+            print(f"Error Code: {e.errno}")
+        print(f"\nFull Traceback:\n{error_traceback}")
+        print(f"{'='*50}\n")
+        
         raise HTTPException(
-            status_code=500, detail=f"An internal error occurred: {str(e)}"
+            status_code=500, detail=f"An internal error occurred: {error_msg}"
         )
 
     finally:
