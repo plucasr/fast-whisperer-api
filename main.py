@@ -1,44 +1,23 @@
 import os
-import uuid
-import shutil
 import traceback
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
-# NOTE: Removed Faster Whisper import as it's not strictly used for text processing
-# You can keep it if you plan to still use it for audio/file processing in other endpoints.
-# from faster_whisper import WhisperModel
+from urllib.parse import urlparse, parse_qs
 
-# --- New Import for Subtitles ---
+# --- Subtitle Imports (Requires modern library version in requirements.txt) ---
 from youtube_transcript_api import (
     YouTubeTranscriptApi,
     TranscriptsDisabled,
     NoTranscriptFound,
 )
-from urllib.parse import urlparse, parse_qs
-# ---------------------------------
+# ----------------------------------------------------------------------------
 
 # --- Configuration ---
 load_dotenv()
 
-# Load the Whisper model from environment variable or use a default
-# WARNING: Since we are not using the model for transcription, this should be removed
-# if the transcription logic is ONLY based on subtitles.
-# MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny.en")
-
-# Create a directory for temporary audio files if it doesn't exist
-TEMP_AUDIO_DIR = Path("temp_audio")
-TEMP_AUDIO_DIR.mkdir(exist_ok=True)
-
-# Cookie paths are now obsolete and removed for simplicity
-# SECRETS_COOKIE_PATH = Path("/etc/secrets/cookies.txt")
-# COOKIE_FILE_PATH = Path("./cookies.txt")
-# SECRETS_DIR = Path("/etc/secrets")
-
-# --- Helper Functions (Simplified) ---
-# Removed: list_secrets_directory, check_cookies_file, copy_cookies_file
-# You can remove these functions entirely from your code.
+# --- Helper Functions ---
 
 
 def extract_video_id(url: str) -> str:
@@ -48,33 +27,28 @@ def extract_video_id(url: str) -> str:
         if parsed_url.path == "/watch":
             # Case: https://www.youtube.com/watch?v=VIDEO_ID
             query = parse_qs(parsed_url.query)
+            # Returns the video ID or None if not found
             return query.get("v", [None])[0]
     elif parsed_url.hostname == "youtu.be":
         # Case: https://youtu.be/VIDEO_ID
+        # Returns the path stripped of the leading '/'
         return parsed_url.path[1:]
 
     # Handle other cases or return None
     return None
 
 
-# --- Model Loading (Simplified) ---
-# Removed the Whisper model loading if not used for audio.
-# If you plan to use Whisper to clean up the transcript text, keep it.
-whisper_model = None  # Set to None for this subtitle-only implementation
-
 # --- FastAPI Application ---
 app = FastAPI(
-    title="YouTube Transcription API (Subtitle-Based)",
-    description="An API to transcribe (fetch subtitles) from YouTube videos.",
+    title="YouTube Subtitle API",
+    description="An API to fetch transcripts (subtitles) from YouTube videos.",
     version="0.1.0",
 )
 
 
 @app.on_event("startup")
 async def startup_event():
-    """
-    Runs at application startup (now simplified as cookie handling is removed).
-    """
+    """Runs at application startup."""
     print("Startup complete. Running in subtitle-fetching mode.")
 
 
@@ -91,17 +65,14 @@ class TranscriptionResponse(BaseModel):
 # --- API Endpoints ---
 @app.get("/")
 def read_root():
-    """
-    Root endpoint to welcome users to the API.
-    """
-    return {"message": "Welcome to the YouTube Transcription API"}
+    """Root endpoint to welcome users to the API."""
+    return {"message": "Welcome to the YouTube Subtitle API"}
 
 
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def create_transcription(request: TranscriptionRequest):
-    """
-    Fetches the transcript/subtitles from a YouTube URL and returns the text.
-    """
+    """Fetches the transcript/subtitles from a YouTube URL and returns the text."""
+
     video_url = str(request.youtube_url)
     video_id = extract_video_id(video_url)
 
@@ -111,13 +82,12 @@ async def create_transcription(request: TranscriptionRequest):
         )
 
     try:
-        # 1. List all available transcripts using the modern method (requires updated library)
+        # 1. List all available transcripts
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
 
         # 2. Try to find the best English track (Manual preferred, then Auto)
         try:
-            # We explicitly search for English ('en' or 'en-US')
-            # This will automatically prioritize manual over auto-generated.
+            # Searches for English ('en' or 'en-US'). Prioritizes manual over auto.
             transcript = transcript_list.find_transcript(["en", "en-US"])
             print(
                 f"INFO: Found English transcript. Generated: {transcript.is_generated}"
@@ -145,6 +115,8 @@ async def create_transcription(request: TranscriptionRequest):
 
         # 5. Fetch and Format the Transcript
         raw_transcript = transcript.fetch()
+
+        # Join the list of text segments into one string, separated by a space
         full_transcription = " ".join([item["text"] for item in raw_transcript])
 
         print("INFO: Transcription (from subtitles) complete.")
@@ -165,13 +137,7 @@ async def create_transcription(request: TranscriptionRequest):
         print(f"FATAL ERROR: {error_type} - {str(e)}")
         print(f"Full Traceback:\n{traceback.format_exc()}")
 
-        # NOTE: If this Exception is still raised, and it's not a library error,
-        # it might be due to YouTube blocking the IP of your cloud service (Render).
         raise HTTPException(
             status_code=500,
-            detail=f"An internal error occurred: {error_type}. (Check dependency version/IP status)",
+            detail=f"An internal error occurred: {error_type}. Please check dependency version or server logs.",
         )
-
-
-# --- Clean up the 'finally' block as it's no longer needed ---
-# Note: The original file cleanup logic is removed because we don't download files.
