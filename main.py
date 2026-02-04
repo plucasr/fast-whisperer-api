@@ -5,8 +5,10 @@ from audio_utils import AudioProcessor, get_supported_languages
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from langchain_core.messages import HumanMessage
+from agent_graph import app as agent_app
 
-app = FastAPI(title="Lexios Transcription API")
+app = FastAPI(title="Lexios Transcription API & AI Hub")
 
 # Add CORS middleware for cross-origin requests
 app.add_middleware(
@@ -35,18 +37,55 @@ class AudioTranscriptionResponse(BaseModel):
     model_info: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
+class SurveyRequest(BaseModel):
+    hub_url: str
+
 
 @app.get("/")
 def root():
     return {
-        "message": "Lexios Transcription API",
-        "version": "1.0.0",
+        "message": "Lexios Transcription API & AI Hub",
+        "version": "1.1.0",
         "endpoints": {
             "POST /transcribe": "Transcribe uploaded audio file",
+            "POST /survey": "Trigger AI Hub Surveyor agent",
             "GET /supported-languages": "Get list of supported languages",
             "GET /health": "Health check endpoint",
         },
     }
+
+@app.post("/survey")
+async def trigger_survey(request: SurveyRequest):
+    """
+    Triggers the AI Hub Surveyor agent to crawl and catalog resources.
+    """
+    try:
+        # Run the agent graph
+        initial_state = {
+            "hub_url": request.hub_url,
+            "messages": [HumanMessage(content="Start survey")],
+            "discovered_links": [],
+            "current_repo": "",
+            "resources_found": []
+        }
+        
+        # Invoke the graph (synchronously for now, can be async with astream)
+        # Note: For long running processes, we should use BackgroundTasks or a queue.
+        # For this PoC, we wait.
+        result = agent_app.invoke(initial_state)
+        
+        # Extract messages or status
+        messages = [m.content for m in result.get("messages", [])]
+        
+        return {
+            "success": True,
+            "status": "completed",
+            "messages": messages[-1] if messages else "No output",
+            "resources_saved_count": len(result.get("resources_found", []))
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Survey execution failed: {str(e)}")
 
 
 @app.post("/transcribe", response_model=AudioTranscriptionResponse)
@@ -126,7 +165,8 @@ def health_check():
         "status": "healthy",
         "whisper_model": audio_processor.model_size,
         "supported_formats": list(AudioProcessor.SUPPORTED_FORMATS),
-        "api_version": "1.0.0",
+        "api_version": "1.1.0",
+        "ai_hub": "active"
     }
 
 

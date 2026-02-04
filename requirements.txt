@@ -7,3 +7,9 @@ python-multipart
 httpx
 pytest
 requests
+langgraph
+langchain
+langchain-google-genai
+PyGithub
+libsql-experimental
+python-dotenv
