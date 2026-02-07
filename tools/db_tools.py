@@ -1,11 +1,10 @@
 import os
-import libsql_experimental as libsql
+import libsql_client
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Setup Sync Connection for now (LangGraph nodes are sync for simplicity usually, or we can make them async)
-# LibSQL experimental supports both.
+# Setup Sync Connection
 url = os.getenv("TURSO_DATABASE_URL")
 auth_token = os.getenv("TURSO_AUTH_TOKEN")
 
@@ -17,7 +16,9 @@ conn = None
 def get_db_connection():
     global conn
     if conn is None and url:
-        conn = libsql.connect(database=url, auth_token=auth_token)
+        # custom client based on the official python sdk
+        conn = libsql_client.create_client_sync(url=url, auth_token=auth_token)
+        
         # Create table if not exists
         conn.execute("""
             CREATE TABLE IF NOT EXISTS theological_resources (
@@ -31,7 +32,7 @@ def get_db_connection():
                 processed BOOLEAN DEFAULT 0
             )
         """)
-        conn.commit()
+        # libsql-client typically auto-commits for single statements or when not in a transaction block
     return conn
 
 def save_resource(resource: dict):
@@ -52,7 +53,6 @@ def save_resource(resource: dict):
             """,
             (resource['name'], resource['download_url'], resource['size'], resource['type'])
         )
-        db.commit()
         print(f"Saved {resource['name']} to DB")
     except Exception as e:
         print(f"Error saving to DB: {e}")
