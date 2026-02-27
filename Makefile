@@ -46,3 +46,7 @@ list-models:
 test-db:
 	@echo "Testing database connectivity..."
 	$(PYTHON) test_db.py
+
+list-bibles:
+	@echo "Listing available Bible versions..."
+	$(PYTHON) -m scripts.list_bibles

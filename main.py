@@ -1,3 +1,4 @@
+from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -6,10 +7,36 @@ from agent_graph import app as agent_app
 from chat_agent import app as chat_agent_app
 import json
 import asyncio
+import uvicorn
+from audio_utils import AudioProcessor, get_supported_languages
 
-# ... (rest of imports)
+# Define Response Models
+class AudioTranscriptionResponse(BaseModel):
+    success: bool
+    transcript: Optional[str] = None
+    language: Optional[str] = None
+    language_probability: Optional[float] = None
+    duration: Optional[float] = None
+    segments: Optional[List[Dict[str, Any]]] = None
+    word_count: Optional[int] = None
+    character_count: Optional[int] = None
+    segment_count: Optional[int] = None
+    average_confidence: Optional[float] = None
+    model_info: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
 
-# ... (existing code)
+# Initialize Audio Processor
+audio_processor = AudioProcessor()
+
+app = FastAPI(title="Lexios Whisperer API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.websocket("/chat/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -42,17 +69,54 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     initial_state = {"messages": lc_messages}
 
-                    async for event in chat_agent_app.astream_events(initial_state, version="v1"):
+                    async for event in chat_agent_app.astream_events(initial_state, version="v2"):
                         kind = event["event"]
+                        name = event.get("name", "Unknown")
+                        data = event.get("data", {})
+                        
+                        # print(f"DEBUG: Event={kind}")
                         
                         if kind == "on_chat_model_stream":
-                            content = event["data"]["chunk"].content
+                            chunk = event["data"]["chunk"]
+                            content = chunk.content
                             if content:
                                 await websocket.send_json({"chunk": content, "status": "streaming"})
+                        elif kind == "on_tool_end":
+                             # Handle tool output to send as a component
+                             output = data.get("output")
+                             # Check if it matches our DictionaryEntry structure (roughly)
+                             # or check tool name if available in event metadata (usually in event['name'] or data)
+                             if name == "DictionaryEntry":
+                                 # Send a special component message
+                                 # output should be the DictionaryEntry instance or dict
+                                 props = output.dict() if hasattr(output, "dict") else output
+                                 component_msg = {
+                                     "type": "component",
+                                     "name": "DictionaryWordView",
+                                     "props": props,
+                                     "status": "component"
+                                 }
+                                 await websocket.send_json(component_msg)
+
                         elif kind == "on_chat_model_end":
                             output = event["data"].get("output")
-                            if output and hasattr(output, "usage_metadata"):
-                                await websocket.send_json({"usage": output.usage_metadata, "status": "usage"})
+                            if output:
+                                # Check for tool calls
+                                tool_calls = getattr(output, "tool_calls", [])
+                                if tool_calls:
+                                    for tool_call in tool_calls:
+                                        if tool_call["name"] == "DictionaryEntry":
+                                            component_msg = {
+                                                "type": "component",
+                                                "name": "DictionaryWordView",
+                                                "props": tool_call["args"],
+                                                "status": "component"
+                                            }
+                                            await websocket.send_json(component_msg)
+
+                                # Check for usage metadata
+                                if hasattr(output, "usage_metadata"):
+                                    await websocket.send_json({"usage": output.usage_metadata, "status": "usage"})
                         
                     await websocket.send_json({"status": "final"})
                     
